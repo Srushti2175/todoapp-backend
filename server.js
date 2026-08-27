@@ -38,7 +38,7 @@ const TodoSchema = new mongoose.Schema({
     text: { type: String, required: true },
     done: { type: Boolean, default: false },
     completedAt: { type: Date, default: null },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true }
 });
 
 const Todo = mongoose.model('Todo', TodoSchema);
@@ -51,12 +51,20 @@ const Todo = mongoose.model('Todo', TodoSchema);
 app.post('/api/signup', async (req, res) => {
     try {
         const { name, email, password } = req.body;
+        if (!name || !email || !password) {
+            return res.status(400).json({ error: "All fields (name, email, password) are required!" });
+        }
+        const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+        if (existingUser) {
+            return res.status(400).json({ error: "An account with this email already exists!" });
+        }
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = new User({ name, email, password: hashedPassword });
+        const newUser = new User({ name: name.trim(), email: email.toLowerCase().trim(), password: hashedPassword });
         await newUser.save();
-        res.status(201).json({ message: "User created!" }); 
+        res.status(201).json({ message: "User created successfully!" }); 
     } catch (error) {
-        res.status(400).json({ error: "Signup failed!" });
+        console.error("Signup error:", error);
+        res.status(400).json({ error: error.message || "Signup failed!" });
     }
 });
 
@@ -64,13 +72,17 @@ app.post('/api/signup', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await User.findOne({ email });
-        if (!user || !(await bcrypt.compare(password, user.password))) {
-            return res.status(400).json({ error: "Invalid credentials!" });
+        if (!email || !password) {
+            return res.status(400).json({ error: "Email and password are required!" });
         }
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const user = await User.findOne({ email: email.toLowerCase().trim() });
+        if (!user || !(await bcrypt.compare(password, user.password))) {
+            return res.status(400).json({ error: "Invalid email or password!" });
+        }
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         res.json({ token }); 
     } catch (error) {
+        console.error("Login error:", error);
         res.status(500).json({ error: "Login error!" });
     }
 });
@@ -82,7 +94,7 @@ app.post('/api/login', async (req, res) => {
 // Get all
 app.get('/api/todos', verifyToken, async (req, res) => {
     try {
-        const todos = await Todo.find({ userId: req.user.id });
+        const todos = await Todo.find({ userId: req.user.id }).lean();
         res.json(todos);
     } catch (error) {
         res.status(500).json({ error: "Fetch error" });
